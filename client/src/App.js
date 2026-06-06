@@ -23,7 +23,7 @@ function App() {
     setReview(null);
     
     try {
-      const response = await axios.post('http://localhost:3001/api/review-pr', {
+      const response = await axios.post('https://ai-code-reviewer-iqxz.onrender.com/api/review-pr', {
         prUrl: prUrl
       });
       
