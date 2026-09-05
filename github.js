@@ -19,7 +19,7 @@ export async function fetchPRDiff(owner, repo, pullNumber, githubToken) {
   const response = await fetch(url, {
     headers: {
       'Accept': 'application/vnd.github.v3.diff',
-      'Authorization': `token ${githubToken}`,
+      'Authorization': `Bearer ${githubToken}`,
       'User-Agent': 'AI-Code-Reviewer'
     }
   });
