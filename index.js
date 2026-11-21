@@ -1,12 +1,7 @@
 // index.js
+import 'dotenv/config'; // must be the FIRST import so .env loads before other files run
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-
-
-dotenv.config();
-
-// Now import your modules (after dotenv.config)
 import { parsePRUrl, fetchPRDiff } from './github.js';
 import { reviewCode } from './aiReview.js';
 
@@ -21,59 +16,58 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server running with Groq AI!' });
 });
 
-// OLD endpoint - just fetches diff
+// Endpoint 1 - only fetches the diff
 app.post('/api/fetch-diff', async (req, res) => {
   const { prUrl } = req.body;
-  
+
   if (!prUrl) {
     return res.status(400).json({ error: 'PR URL required' });
   }
-  
+
   try {
     const { owner, repo, pullNumber } = parsePRUrl(prUrl);
     const diff = await fetchPRDiff(owner, repo, pullNumber, process.env.GITHUB_TOKEN);
-    
+
     res.json({
       success: true,
       prInfo: { owner, repo, pullNumber },
       diffLength: diff.length,
-      diffPreview: diff.substring(0, 500) + (diff.length > 500 ? '...' : '')
+      diffPreview: diff.substring(0, 500) + (diff.length > 500 ? '...' : ''),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// NEW endpoint - fetches diff AND reviews it with Groq AI
+// Endpoint 2 - fetches the diff AND reviews it with Groq AI
 app.post('/api/review-pr', async (req, res) => {
   const { prUrl } = req.body;
-  
+
   if (!prUrl) {
     return res.status(400).json({ error: 'PR URL required' });
   }
-  
+
   try {
     console.log(`\n📥 Fetching PR: ${prUrl}`);
-    
+
     const { owner, repo, pullNumber } = parsePRUrl(prUrl);
     const diff = await fetchPRDiff(owner, repo, pullNumber, process.env.GITHUB_TOKEN);
-    
+
     console.log(`📄 Diff size: ${diff.length} characters`);
     console.log('🤖 Sending to Groq for review...');
-    
+
     const review = await reviewCode(diff);
-    
+
     res.json({
       success: true,
       prInfo: { owner, repo, pullNumber },
-      review: review
+      review: review,
     });
-    
   } catch (error) {
     console.error(`❌ Error: ${error.message}`);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      error: error.message 
+      error: error.message,
     });
   }
 });

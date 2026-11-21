@@ -1,57 +1,131 @@
+
 import Groq from "groq-sdk";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+const reviewSchema = {
+  type: "object",
+  properties: {
+    summary: {
+      type: "string",
+    },
+    score: {
+      type: "number",
+    },
+    bugs: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          line: { type: "string" },
+          message: { type: "string" },
+          severity: {
+            type: "string",
+            enum: ["critical", "warning", "minor"],
+          },
+        },
+        required: ["line", "message", "severity"],
+        additionalProperties: false,
+      },
+    },
+    security: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          line: { type: "string" },
+          message: { type: "string" },
+          severity: {
+            type: "string",
+            enum: ["critical", "warning", "minor"],
+          },
+        },
+        required: ["line", "message", "severity"],
+        additionalProperties: false,
+      },
+    },
+    performance: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          line: { type: "string" },
+          message: { type: "string" },
+          severity: {
+            type: "string",
+            enum: ["critical", "warning", "minor"],
+          },
+        },
+        required: ["line", "message", "severity"],
+        additionalProperties: false,
+      },
+    },
+    suggestions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    "summary",
+    "score",
+    "bugs",
+    "security",
+    "performance",
+    "suggestions",
+  ],
+  additionalProperties: false,
+};
+
 export async function reviewCode(diff) {
-  if (!diff || diff.trim().length === 0) {
+  if (!diff || !diff.trim()) {
     throw new Error("No Pull Request diff found.");
   }
 
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error("GROQ_API_KEY is missing.");
+  }
+
+  const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+
   const systemPrompt = `
-You are an expert software engineer.
+You are an experienced senior software engineer.
 
-Review the GitHub Pull Request diff.
+Analyze the supplied GitHub Pull Request diff.
 
-Respond ONLY with valid JSON.
+Identify genuine:
+1. Bugs and logical errors.
+2. Security vulnerabilities.
+3. Performance problems.
+4. Suggestions for improvement.
 
-{
-  "summary": "",
-  "score": 0,
-  "bugs": [],
-  "security": [],
-  "performance": [],
-  "suggestions": []
-}
-
-Each bug/security/performance item must contain:
-
-{
-  "line": "",
-  "message": "",
-  "severity": "critical"
-}
-
-Severity must be one of:
-
-critical
-warning
-minor
-
-Do not include markdown.
-Do not include explanations.
-Do not wrap JSON in backticks.
+Important rules:
+- Only report issues supported by the diff.
+- Do not invent bugs.
+- Use the filename and changed line number when possible.
+- If no issue exists, return an empty array.
+- Score must be between 0 and 100.
+- Higher scores indicate better code quality.
+- Return the complete review using the required JSON structure.
 `;
 
   try {
     console.log("================================");
-    console.log("Starting AI Review");
-    console.log(process.env.GROQ_MODEL);
+    console.log("Starting AI Code Review");
+    console.log("Model:", model);
+    console.log("Diff length:", diff.length);
     console.log("================================");
 
     const response = await groq.chat.completions.create({
-      model: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+      model,
 
       messages: [
         {
@@ -60,51 +134,57 @@ Do not wrap JSON in backticks.
         },
         {
           role: "user",
-          content: `Review this GitHub Pull Request diff:
-
-${diff.slice(0, 12000)}
-`,
+          content:
+            "Review the following GitHub Pull Request diff:\n\n" +
+            diff.slice(0, 12000),
         },
       ],
 
-      temperature: 0.1,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_review",
+          strict: true,
+          schema: reviewSchema,
+        },
+      },
+
+      reasoning_effort: "low",
+      max_completion_tokens: 4096,
     });
 
-    const aiContent = response.choices[0].message.content;
+    const aiContent = response.choices?.[0]?.message?.content;
 
-    console.log("AI Response:");
-    console.log(aiContent);
-
-    let review;
-
-    try {
-      review = JSON.parse(aiContent);
-    } catch {
-      const match = aiContent.match(/\{[\s\S]*\}/);
-
-      if (!match) {
-        throw new Error("Model did not return valid JSON.");
-      }
-
-      review = JSON.parse(match[0]);
+    if (!aiContent) {
+      throw new Error("Groq returned an empty AI response.");
     }
 
+    const review = JSON.parse(aiContent);
+
+    if (
+      typeof review.score !== "number" ||
+      review.score < 0 ||
+      review.score > 100
+    ) {
+      throw new Error("Invalid review score received.");
+    }
+
+    console.log("AI Review completed successfully.");
+
     return {
-      summary: review.summary || "Review completed.",
-
-      score: typeof review.score === "number" ? review.score : 70,
-
-      bugs: Array.isArray(review.bugs) ? review.bugs : [],
-
-      security: Array.isArray(review.security) ? review.security : [],
-
-      performance: Array.isArray(review.performance) ? review.performance : [],
-
-      suggestions: Array.isArray(review.suggestions) ? review.suggestions : [],
+      summary: review.summary,
+      score: review.score,
+      bugs: review.bugs,
+      security: review.security,
+      performance: review.performance,
+      suggestions: review.suggestions,
     };
-  } catch (err) {
-    console.error(err);
 
-    throw new Error(`Groq API Error: ${err.message}`);
+  } catch (error) {
+    console.error("Groq Review Error:", error.message);
+
+    throw new Error(
+      `AI review failed: ${error.message}`
+    );
   }
 }
